@@ -69,14 +69,24 @@ def rogan_gladen(observed_rate: float, sensitivity: float, specificity: float) -
     return min(1.0, max(0.0, (observed_rate + specificity - 1) / denom))
 
 
-def paired_bootstrap(a: Sequence[float], b: Sequence[float], *, n_resamples: int = 1000,
-                     rng: int = 2027, confidence: float = 0.95) -> tuple[float, float, float]:
-    """a[i], b[i] = per-item mean over seeds, SAME items, SAME order.
-    Return (mean(a)-mean(b), lo, hi) with scipy.stats.bootstrap(paired=True, method="percentile",
-    rng=numpy.random.default_rng(rng)). If a == b everywhere return (0.0, 0.0, 0.0)."""
-    # TODO M4
-    raise NotImplementedError
+def paired_bootstrap(a, b, *, n_resamples=1000, rng=2027, confidence=0.95):
+    import numpy as np
+    from scipy.stats import bootstrap
 
+    x, y = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    if x.shape != y.shape or x.size == 0:
+        raise ValueError("paired_bootstrap needs two non-empty sequences of equal length")
+    if np.array_equal(x, y):
+        return (0.0, 0.0, 0.0)
+    diff = float(x.mean() - y.mean())
+
+    def stat(p, q, axis=-1):
+        return np.mean(p, axis=axis) - np.mean(q, axis=axis)
+
+    res = bootstrap((x, y), stat, paired=True, vectorized=True, n_resamples=n_resamples,
+                    method="percentile", confidence_level=confidence,
+                    rng=np.random.default_rng(rng))
+    return diff, float(res.confidence_interval.low), float(res.confidence_interval.high)
 
 def pass_at_k(n: int, c: int, k: int) -> float:
     """Probability that AT LEAST ONE of k trials drawn from n (c of them passing) passes.
