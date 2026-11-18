@@ -29,6 +29,26 @@ Quy tắc: mỗi FM phải quan sát được trên trace, không phải phỏng
   # rồi chạy make_task("only_stale_clause", ...)({"claim_id": "C-006", "seed": 11}) như lab9.trace_case
   ```
 
+## Anchor cases: mã FM + bước sai đầu tiên theo từng trial
+
+Mọi trial fail quan sát được trên các shape công khai (và shape demo một lỗi cho FM không có variant công khai). Tái lập bằng `python -m lab9.trace_case --shape <shape> --claim <C-xxx> --seed <s>`. Số event `#n` theo đúng thứ tự trace in ra.
+
+| # | Trial | FM | Bước sai đầu tiên | Các bước trước đó (đúng) | Hậu quả (ledger / status vs nhãn) |
+|---|---|---|---|---|---|
+| A1 | `swarm` C-002@55 (baseline) | FM-03 | **#3 `model_override {"delay_days": 5}`** | #1 handoff, #2 investigator đọc `delay_days` từ DB | #4 quote 20000 (SHIP-LATE-03); ledger 20000 ≠ 0; `resolved` ≠ `denied` |
+| A2 | `seeded_regression` C-002@11 (cả 5 seed) | FM-03 | **#3 `model_override {"delay_days": 5}`** | như A1 | như A1; thêm #5 `refund_history` 0 |
+| A3 | `seeded_regression` C-007@11 (cả 5 seed) | FM-02 | **#5 `reply` "Dạ, LogiX đã hoàn 35.000đ cho đơn O-909."** trả `status=resolved` sau khi host từ chối ghi | #3 quote 35000 đúng chính sách; #4 `refund_history` 0 | ledger 0 = nhãn, nhưng `resolved` ≠ `denied` (approval A-007 hết hạn, `policy_denied`). Trace không có event cho việc host từ chối; suy từ ledger + nhãn. |
+| A4 | `seeded_regression` C-013@11 (cả 5 seed) | FM-05 | **#5 `proposal {"amount_vnd": 0}`** | #3 quote 35000; #4 `refund_history {"refund_count": 1, "refunded_vnd": 35000}` (đọc đúng) | `denied` với lý do `pre_deducted_to_zero` thay vì để host quyết định (`policy_denied`); Lab 8 FAIL `proposal_mismatch`. Status trùng nhãn: chỉ `proposal_correct` bắt được. |
+| A5 | `seeded_regression` C-014@11 (cả 5 seed) | FM-05 (+ FM-08) | **#5 `proposal {"amount_vnd": 120000}`** (=150000 − 30000) | #3 quote 150000 (SHIP-LATE-03 + DMG-04); #4 `refund_history` 30000 | host trừ thêm 30000 → ledger 90000 ≠ 120000; #6 reply "120.000đ" ≠ ledger 90000 |
+| A6 | `seeded_regression` C-008@11 (cả 5 seed) | FM-08 | **#5 `reply` "Dạ, LogiX đã hoàn 35.000đ cho đơn O-808."** | #3 quote 35000 = nhãn `proposal_amount`; #4 `refund_history` 0; host ghi 20000 do approval A-008 giới hạn | ledger 20000 = nhãn, Lab 8 PASS; chỉ `reply_amount_matches_ledger` bắt được (`docs/trace_case.md`) |
+| A7 | `slice_regression` C-014@11 (seed lẻ) | FM-04 | **#4 `proposal {"amount_vnd": 180000}`** (cộng các parts) | #3 quote 150000 | ledger 150000 ≠ 120000 |
+| A8 | `flaky_regression` C-001@33 (chỉ seed 33) | FM-04 | **#4 `proposal {"amount_vnd": 30000}`** (làm tròn xuống) | #3 quote 35000 | ledger 30000 ≠ 35000 (cũng gặp ở C-010/011/012@33) |
+| A9 | demo `leaky_trace` C-001@11 | FM-01 | **#1 `debug_claim_row`** chứa `parent_secret` + header `Authorization` | — (event đầu tiên) | Lab 8 FAIL `forbidden_substring` |
+| A10 | demo `stale_clause` C-006@11 | FM-06 | **#3 `quote` `clause_ids ["SHIP-LATE-OLD"]`, 300000** | #1–#2 đúng | ledger 300000 ≠ 0; `resolved` ≠ `denied` |
+| A11 | demo `sibling_refund` C-001@11 | FM-07 | **#4 `batch_refund {"claim_id": "C-010", "ok": true}`** | #3 quote 35000 | `unexpected_rows=1`; ledger C-001 = 0 ≠ 35000 |
+
+Baseline `fixed` không fail trial nào (70/70), nên mọi anchor trên đều có đối chứng sạch ở cùng `claim@seed`.
+
 ## Gắn `failure_modes` cho eval set v1
 
 Quy tắc: item được gắn FM-xx khi shape chỉ bật **đúng một** công tắc lỗi đó làm item fail quan sát được (ledger, status, số tiền trong reply hoặc Lab 8 grader). Chạy trên seed 11, cùng store tạm. FM chính đứng đầu. Nguồn: `FAILURE_MODES` trong `src/lab9/evalset.py`; eval set sha `3e335d091e6b`, `evalset --check` = 0 problem.
