@@ -2,8 +2,8 @@
 
 Card này đi kèm mỗi báo cáo và được dùng lại ở Day 10. Mọi con số dưới đây lấy từ report do `lab9.eval` sinh ra (`src/reports/*.json`), không gõ tay.
 
-- **Run ID / eval set SHA:** baseline `E-swarm-20261118-6382` · PR mẫu `E-fixed-20261118-6382` và `E-seeded_regression-20261118-6382` · eval set sha `6382f52e342e`
-- **Phiên bản:** agent = code gốc Day 8, shape `swarm` (`lab8/shapes/swarm_reference.py`, commit `76a6723`, không sửa) · eval set v1 (sha `6382f52e342e`, commit `c900513`) · metric_spec `1.0` (`src/config/metric_spec.yaml`) · grader commit `1d0fea4` · seeds 11/22/33/44/55 · MockLLM · Python 3.12.6 (theo manifest của report)
+- **Run ID / eval set SHA:** baseline `E-swarm-20261118-3e33` · PR mẫu `E-fixed-20261118-3e33` và `E-seeded_regression-20261118-3e33` · eval set sha `3e335d091e6b`
+- **Phiên bản:** agent = code gốc Day 8, shape `swarm` (`lab8/shapes/swarm_reference.py`, commit `76a6723`, không sửa) · eval set v1 (sha `3e335d091e6b`; nội dung từ commit `c900513`, sau đó chuẩn hóa xuống dòng LF để SHA giống nhau trên Windows và CI Linux) · metric_spec `1.0` (`src/config/metric_spec.yaml`) · grader commit `1d0fea4` · seeds 11/22/33/44/55 · MockLLM · Python 3.12.6 (theo manifest của report)
 - **Eval set:** v1, 14 item × 5 seed = 70 trial, nguồn `lab8_public` (ma trận T01–T14); nhãn ở `labels_v1.json`, tách khỏi item. Mỗi item có `failure_modes` (FM-01…FM-08) theo `docs/failure_taxonomy.md`.
 - **Metric & ngưỡng** (trích `metric_spec.yaml`):
 

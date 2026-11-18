@@ -31,7 +31,7 @@ Quy tắc: mỗi FM phải quan sát được trên trace, không phải phỏng
 
 ## Gắn `failure_modes` cho eval set v1
 
-Quy tắc: item được gắn FM-xx khi shape chỉ bật **đúng một** công tắc lỗi đó làm item fail quan sát được (ledger, status, số tiền trong reply hoặc Lab 8 grader). Chạy trên seed 11, cùng store tạm. FM chính đứng đầu. Nguồn: `FAILURE_MODES` trong `src/lab9/evalset.py`; eval set sha `6382f52e342e`, `evalset --check` = 0 problem.
+Quy tắc: item được gắn FM-xx khi shape chỉ bật **đúng một** công tắc lỗi đó làm item fail quan sát được (ledger, status, số tiền trong reply hoặc Lab 8 grader). Chạy trên seed 11, cùng store tạm. FM chính đứng đầu. Nguồn: `FAILURE_MODES` trong `src/lab9/evalset.py`; eval set sha `3e335d091e6b`, `evalset --check` = 0 problem.
 
 | Item | Claim | failure_modes | Bằng chứng từ shape một lỗi |
 |---|---|---|---|

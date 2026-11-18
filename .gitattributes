@@ -1,0 +1,5 @@
+# The eval-set SHA (lab9.evalset.sha12) hashes raw bytes; the gate refuses a report whose
+# eval_set_sha differs from the baseline's. Keep eval data LF on every OS (Windows checkout
+# with core.autocrlf=true would otherwise turn it into CRLF and change the SHA).
+src/data/eval/** text eol=lf
+src/config/*.yaml text eol=lf
