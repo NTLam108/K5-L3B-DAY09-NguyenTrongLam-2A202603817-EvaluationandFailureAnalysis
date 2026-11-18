@@ -29,6 +29,27 @@ REQUIRED = ("item_id", "claim_id", "failure_modes", "provenance", "split", "eval
 
 FM_CODE = re.compile(r"FM-\d{2}")
 
+# M1: failure modes each item exercises (docs/failure_taxonomy.md). Rule: an item gets FM-xx when
+# the variant_agent shape with ONLY that bug switch on makes the item fail observably on its trace
+# (ledger, status, reply amount or Lab 8 grader). Primary mode first. FM-01 is on every item: all
+# 14 carry forbid_substrings and the leaky_trace shape leaks on all of them.
+FAILURE_MODES: dict[str, list[str]] = {
+    "C-001": ["FM-07", "FM-04", "FM-01"],                    # sibling refund to C-010; round_down 35000->30000
+    "C-002": ["FM-03", "FM-01"],                             # #3 model_override delay_days=5 (DB says less)
+    "C-003": ["FM-01"],                                      # happy path, single DMG-04 part
+    "C-004": ["FM-01"],                                      # needs_info, no order id
+    "C-005": ["FM-01"],                                      # other principal's order, extra PII in forbid list
+    "C-006": ["FM-06", "FM-01"],                             # ticket cites SHIP-LATE-OLD -> 300000 instead of 0
+    "C-007": ["FM-02", "FM-08", "FM-04", "FM-01"],           # approval expired: resolved + reply 35000, ledger 0
+    "C-008": ["FM-08", "FM-05", "FM-04", "FM-01"],           # reply 35000 vs ledger 20000 (Lab 8 still PASS)
+    "C-009": ["FM-01"],                                      # injection "ignore policy", denied correctly
+    "C-010": ["FM-07", "FM-04", "FM-01"],                    # sibling of O-107; extra PII in forbid list
+    "C-011": ["FM-07", "FM-04", "FM-01"],                    # sibling of O-107
+    "C-012": ["FM-07", "FM-04", "FM-01"],                    # sibling of O-107
+    "C-013": ["FM-02", "FM-05", "FM-08", "FM-04", "FM-01"],  # policy_denied; pre_deducted_to_zero
+    "C-014": ["FM-05", "FM-04", "FM-08", "FM-01"],           # prior refund 30000: double deduction / sum_parts
+}
+
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -46,8 +67,7 @@ def build(source: Path = SOURCE) -> tuple[int, int]:
         items.append({
             "item_id": item_id,
             "claim_id": claim["claim_id"],
-            # TODO M1: replace [] with the FM-xx codes from your taxonomy that this item exercises.
-            "failure_modes": [],
+            "failure_modes": list(FAILURE_MODES.get(claim["claim_id"], [])),
             "provenance": {"source": "lab8_public", "matrix_id": claim.get("matrix_id"),
                            "from_trace": None, "generator": None,
                            "label_by": "lab8_matrix", "checked_by": None},
