@@ -51,4 +51,30 @@ Grader được kiểm bằng `python -m lab9.mutation --detect`: **100%** dòng
   - **Judge replay** trên CSV công khai, chưa có held-out mới; judge tone chưa vào gate.
   - **Grader FM-08 dựa vào regex** số tiền dạng `35.000đ`; reply diễn đạt khác (ví dụ "35 nghìn") có thể làm sót.
   - Chưa đo trên người dùng thật; trace không ghi event kết quả của host.
+## v2 (M5): eval set v2 + slice gate
+
+- **Run ID / eval set:** baseline `E-swarm-20261118-43a9` · eval set v2 sha `43a95d4196d9` (28 item × 5 seed: 14 v1 + 14 adversarial) · `metric_spec_v2.yaml` (`2.0`). Mọi FM bị tấn công có ≥3 item (FM-03 ×3, FM-06 ×3, FM-09 ×3…), xem `docs/failure_taxonomy.md`.
+- **Slice** (tag sinh từ nhãn, `lab9.evalset.slices_for`):
+
+| Slice | n item | Metric | Ngưỡng | Baseline v2 |
+|---|---|---|---|---|
+| `money_movement` | 12 | pass_rate · refund_amount_correct · reply_amount_matches_ledger | min 0.95 + không giảm có ý nghĩa | 1.0 · 1.0 · 1.0 |
+| `adversarial` | 14 | pass_rate | min 0.95 + không giảm có ý nghĩa | 0.971 |
+| `denial` | 11 | pass_rate | min 0.90 + không giảm có ý nghĩa | 0.945 |
+| `escalation` | 4 | pass_rate | min 0.95 + không giảm có ý nghĩa | 1.0 |
+
+Sàn đặt ≤ giá trị baseline (baseline so với chính nó: exit 0) và trên giá trị của regression công khai. Riêng `adversarial` (0.971) và `denial` (0.945) chỉ cách sàn khoảng 1 trial; sẽ xét lại theo dải nhiễu A/A ở M6.
+
+- **Slice nào bắt lỗi nào** (`python -m lab9.mutation --spec config/metric_spec_v2.yaml --baseline reports/baseline_v2.json` → **mutation score 3/3, false alarms 0**):
+
+| Variant | Kỳ vọng | Gate | Bị chặn bởi |
+|---|---|---|---|
+| `fixed` | merge | merge | — |
+| `honest_refactor` | merge | merge | — (đổi lời văn + thêm tool call không làm thay đổi metric nào) |
+| `seeded_regression` | block | block | pass_rate (Δ −0.336 CI [−0.500, −0.171]), refund, FM-08, slice money_movement ×3, adversarial, denial |
+| `slice_regression` | block | block | **chỉ slice**: money_movement/pass_rate 0.85 và refund 0.85 (Δ −0.150 CI [−0.300, +0.000]), adversarial/pass_rate 0.914. **`pass_rate` tổng 0.9357 vẫn trên sàn 0.85, CI [−0.121, +0.029] chạm 0, nên gate M4 sẽ cho qua.** |
+| `flaky_regression` | block | block | pass_rate (Δ −0.064 CI [−0.114, −0.014]), slice money_movement, adversarial; `pass_hat_5` sẽ thêm ở M6 |
+
+- **Giới hạn v2:** slice `escalation` chỉ có 4 item, nên CI gần như vô nghĩa và slice này chỉ dựa vào sàn. FM-09 mới chỉ có trace "guard chặn đúng", chưa có variant nào làm lộ lỗi. Bug chỉ xuất hiện ở 1/3 seed (`rare`) không phát hiện ổn định được với 5 seed (xem M6).
+
 - **Khi nào tăng eval-set version:** khi thêm/bớt item (ví dụ thêm item từ trace case với `provenance.from_trace`, hoặc adversarial pack v2), đổi nhãn (ví dụ sửa nhãn H-081), hoặc đổi `failure_modes`. Mỗi lần tăng version phải chạy lại baseline trên `main`; ngưỡng chỉ được nới khi lên version mới, còn trong cùng version chỉ được siết (ratchet).
