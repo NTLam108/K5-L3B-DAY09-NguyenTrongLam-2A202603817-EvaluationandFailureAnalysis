@@ -112,4 +112,45 @@ Sàn đặt ≤ giá trị baseline (baseline so với chính nó: exit 0) và t
 
 `pass_rate` đổi theo bộ seed (0.91 so với 0.83) dù agent không đổi. `pass_hat_5` ổn định vì chỉ cần 1 seed fail. Không hạ ngưỡng để gate "bắt được" bug hiếm; cách đúng là tăng số seed (ví dụ 10 seed: (2/3)^10 ≈ 1.7%) ở eval-set version sau.
 
+## v2 (M7): gate chống gian lận eval (`integrity_check` + ratchet)
+
+Gate so số với ngưỡng thì có thể bị qua mặt bằng một report đã "làm đẹp". Trước khi so sánh, `lab9.gate.integrity_check` kiểm report có đáng tin không; có vấn đề nào là gate in `INTEGRITY …` và exit 1. Một gate cho qua report hỏng còn tệ hơn không có gate.
+
+- **Các kiểm tra** (`src/lab9/gate.py`):
+  1. Metric là NaN/inf.
+  2. Số dòng ≠ `manifest.items × len(manifest.seeds)`; dòng `(item, seed)` trùng lặp.
+  3. Tập `(item, seed)` khác baseline; `manifest.items` / `manifest.seeds` khác baseline.
+  4. `evaluator_failures` khác rỗng; dòng có ô `None` ở metric được chấm (grader crash bị giấu).
+  5. Metric khai báo ≠ metric tính lại từ chính các dòng bằng `lab9.eval.aggregate` (sửa tay report).
+  6. Slice tag của một item khác baseline (đổi nhãn để né slice gate).
+  7. **Ratchet** (`--base-spec`): cùng eval-set version thì `min` không được giảm, `max`/`max_increase` không được tăng, metric/slice không được biến mất, blocking không được thành non-blocking, không được bỏ `no_significant_drop`. Khai báo `eval_set_version` mới trong khi eval set SHA không đổi cũng bị chặn (chống né ratchet bằng cách đổi số version).
+- **4 trap công khai** (`python -m lab9.traps --pr reports/eval_slice_regression.json --baseline reports/baseline_v2.json --spec config/metric_spec_v2.yaml` → **exit 0, cả 4 bị chặn**):
+
+| Trap | Lý do gate chặn (output thật) |
+|---|---|
+| `evaluator_errors_as_nan` | `INTEGRITY ('E-014', 11) has no value for ['refund_amount_correct', 'pass_rate', 'proposal_correct']` |
+| `dropped_failing_rows` | `INTEGRITY 131 rows, manifest says 140` · `(item, seed) set differs from baseline` |
+| `cherry_picked_seeds` | `INTEGRITY (item, seed) set differs from baseline` · `manifest.seeds differs from baseline` (trap sửa cả manifest nên số dòng vẫn khớp; chỉ so với baseline mới lộ) |
+| `loosened_spec` | `INTEGRITY metric pass_rate min lowered` · `dropped no_significant_drop` · `pass_hat_5 min lowered` · … · slice bị xóa |
+
+- **Trap ẩn tự dựng để thử** (gợi ý của CHECKPOINTS và vài mánh khác; có test hồi quy trong `src/tests/test_lab9_advanced_integrity.py`):
+
+| Trap | Kết quả | Lý do |
+|---|---|---|
+| Bỏ 1 dòng fail, nhân đôi 1 dòng pass (số dòng vẫn đúng) | chặn | `duplicated (item, seed) rows` |
+| Run xanh nhưng `evaluator_failures` khác rỗng | chặn | `1 evaluator failure(s)` |
+| Sửa tay `metrics.pass_rate` = 0.99, giữ nguyên rows | chặn | `metric pass_rate=0.99 but rows give 0.9357` |
+| Gỡ tag `money_movement` khỏi E-014/E-105/E-106 | chặn | `E-014 slice tags changed` |
+| Đổi `eval_set_version: v3` + hạ ngưỡng | chặn | `spec claims a new eval_set_version but the eval set is unchanged` |
+| `pass_hat_5` thành non-blocking | chặn | `metric pass_hat_5 no longer blocking` |
+| `pass_rate` = NaN | chặn | `metric pass_rate is nan` |
+| Variant `quiet_override` (tin ticket nhưng **không** ghi event `model_override`) | chặn | `refund_amount_correct`, slice `adversarial`, `denial`; `db_fact_kept` = 1.0 không thấy lỗi, metric outcome bắt thay |
+| **Lật dòng fail thành pass, giữ đủ dòng và tính lại metrics** | **LỌT** | report nhất quán hoàn toàn, chỉ nói dối về kết quả |
+
+- **Không báo nhầm:** `lab9.mutation --spec config/metric_spec_v2.yaml --baseline reports/baseline_v2.json --base-spec config/metric_spec_v2.yaml` → **3/3, 0 false alarm**; baseline v2 so với chính nó kèm `--base-spec` → merge; A/A Δ = 0; gate v1 không đổi (`swarm`/`fixed` exit 0, `seeded_regression` exit 1 có `pass_rate`).
+- **Trap nào còn có thể lọt (giới hạn):**
+  - `integrity_check` chỉ kiểm **tính nhất quán nội bộ** của report (và so với baseline), không chứng minh report được sinh bởi script trên đúng agent. Report "lật dòng" nhất quán, hoặc report chạy agent khác nhưng gắn `shape: swarm`, sẽ lọt. Biện pháp đúng: **không tin report do PR nộp**. CI tự chạy `lab9.eval` (job `eval-gate` sinh `eval_pr.json` cho `swarm`), và `ci_check` so baseline đã commit với lần chạy của CI.
+  - Nếu người gian lận sửa đồng thời cả baseline lẫn report PR một cách nhất quán, mọi so sánh với baseline đều vô hiệu. Baseline phải được sinh lại trên nhánh được bảo vệ, như `ci_check` đang làm cho v1.
+  - Ratchet chỉ chạy khi gate được gọi với `--base-spec` (spec của `main`). Job CI v2 hiện chạy `lab9.mutation` không kèm `--base-spec`, nên khi dùng thật cần truyền spec của `main` vào.
+
 - **Khi nào tăng eval-set version:** khi thêm/bớt item (ví dụ thêm item từ trace case với `provenance.from_trace`, hoặc adversarial pack v2), đổi nhãn (ví dụ sửa nhãn H-081), hoặc đổi `failure_modes`. Mỗi lần tăng version phải chạy lại baseline trên `main`; ngưỡng chỉ được nới khi lên version mới, còn trong cùng version chỉ được siết (ratchet).

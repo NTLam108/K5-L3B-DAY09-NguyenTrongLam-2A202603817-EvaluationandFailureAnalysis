@@ -18,23 +18,97 @@ from lab9 import stats
 from lab9.eval import SPEC, load_spec, per_item
 
 
-def integrity_check(pr: dict, base: dict, spec: dict, base_spec: dict | None = None) -> list[str]:
-    """M7 (Expert): refuse to compare reports that cannot be trusted. Return a list of problems
-    (empty = trustworthy). A gate that passes a broken report is worse than no gate.
-    Must catch at least:
-      - any metric value in pr["metrics"] that is NaN or inf
-      - len(pr["rows"]) != manifest items x len(manifest seeds)   (dropped / duplicated rows)
-      - the (item_id, seed) set of PR differs from the baseline's (cherry-picked seeds/items)
-      - pr["evaluator_failures"] non-empty, or a row whose value for a graded spec metric is
-        None (a crashed grader silently scores as "missing" and drops out of the mean)
-      - base_spec given and a threshold in spec is LOOSER than in base_spec for the same
-        eval-set version (ratchet: max may not rise, min may not fall, a blocking metric may
-        not become non-blocking, a metric may not disappear; the same for spec["slices"],
-        including dropping no_significant_drop)
-      - an item's slice tags in PR rows differ from the baseline's (relabelling an item out of a
-        slice hides its regression from the slice gate)"""
-    # TODO M7
-    return []
+import math
+from lab9.eval import aggregate          # dùng lại đúng hàm tổng hợp của harness
+
+def _key(r):
+    return (r.get("item_id"), r.get("seed"))
+
+def integrity_check(pr, base, spec, base_spec=None):
+    problems: list[str] = []
+    rows, brows = pr.get("rows") or [], base.get("rows") or []
+
+    # 1. NaN / inf trong metrics
+    for m, v in (pr.get("metrics") or {}).items():
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            problems.append(f"metric {m} is {v}")
+
+    # 2. Số dòng khớp manifest, không trùng lặp
+    man = pr.get("manifest") or {}
+    want = int(man.get("items") or 0) * len(man.get("seeds") or [])
+    if len(rows) != want:
+        problems.append(f"{len(rows)} rows, manifest says {want}")
+    keys = [_key(r) for r in rows]
+    if len(keys) != len(set(keys)):
+        problems.append("duplicated (item, seed) rows")
+
+    # 3. Cùng tập (item, seed) và cùng manifest với baseline
+    if set(keys) != {_key(r) for r in brows}:
+        problems.append("(item, seed) set differs from baseline (dropped / cherry-picked)")
+    for f in ("items", "seeds"):
+        if man.get(f) != (base.get("manifest") or {}).get(f):
+            problems.append(f"manifest.{f} differs from baseline")
+
+    # 4. Grader hỏng: evaluator_failures, hoặc ô None ở metric được chấm
+    if pr.get("evaluator_failures"):
+        problems.append(f"{len(pr['evaluator_failures'])} evaluator failure(s)")
+    graded = [m["id"] for m in spec["metrics"] if any(m["id"] in r for r in brows + rows)]
+    for r in rows:
+        bad = [m for m in graded if r.get(m) is None]
+        if bad:
+            problems.append(f"{_key(r)} has no value for {bad}"); break
+
+    # 5. Metric khai báo phải khớp với metric tính lại từ rows (bắt sửa tay report)
+    if rows:
+        ids = [m for m in graded if all(m in r for r in rows)]
+        # aggregate() needs a cost column for cost_per_success, which is not compared here;
+        # default it so a report without cost (e.g. a trimmed report) does not crash the check.
+        again = aggregate([{**r, "cost": r.get("cost") or 0.0} for r in rows], ids,
+                          k_values=spec.get("pass_k", []))
+        for m in ids + ["pass_5"] + [f"pass_hat_{k}" for k in spec.get("pass_k", [])]:
+            a, b = pr["metrics"].get(m), again.get(m)
+            if isinstance(a, (int, float)) and isinstance(b, (int, float)) and abs(a - b) > 1e-6:
+                problems.append(f"metric {m}={a} but rows give {b}")
+
+    # 6. Slice tag của từng item phải giống baseline
+    btags = {r["item_id"]: sorted(r.get("slices") or []) for r in brows}
+    for r in rows:
+        if r["item_id"] in btags and sorted(r.get("slices") or []) != btags[r["item_id"]]:
+            problems.append(f"{r['item_id']} slice tags changed"); break
+
+    # 7. Ratchet
+    if base_spec is not None:
+        problems += _ratchet(spec, base_spec, pr, base)
+    return problems
+
+def _ratchet(spec, base_spec, pr, base):
+    out = []
+    same_version = spec.get("eval_set_version") == base_spec.get("eval_set_version")
+    if not same_version and pr["manifest"]["eval_set_sha"] == base["manifest"]["eval_set_sha"]:
+        out.append("spec claims a new eval_set_version but the eval set is unchanged")
+    if not same_version:
+        return out                               # version mới thì được đặt lại ngưỡng
+    def check(tag, old, new):
+        if new is None:
+            out.append(f"{tag} removed"); return
+        if old.get("blocking") and not new.get("blocking"):
+            out.append(f"{tag} no longer blocking")
+        ot, nt = old.get("threshold", old), new.get("threshold", new)   # slice để ngưỡng phẳng
+        if "min" in ot and ("min" not in nt or nt["min"] < ot["min"]):
+            out.append(f"{tag} min lowered")
+        if "max" in ot and ("max" not in nt or nt["max"] > ot["max"]):
+            out.append(f"{tag} max raised")
+        if "max_increase" in ot and ("max_increase" not in nt or nt["max_increase"] > ot["max_increase"]):
+            out.append(f"{tag} max_increase raised")
+        if ot.get("no_significant_drop") and not nt.get("no_significant_drop"):
+            out.append(f"{tag} dropped no_significant_drop")
+    new_m = {m["id"]: m for m in spec["metrics"]}
+    for m in base_spec["metrics"]:
+        check(f"metric {m['id']}", m, new_m.get(m["id"]))
+    new_s = {(s["name"], s["metric"]): s for s in spec.get("slices") or []}
+    for s in base_spec.get("slices") or []:
+        check(f"slice {s['name']}/{s['metric']}", s, new_s.get((s["name"], s["metric"])))
+    return out
 
 
 def slice_check(pr: dict, base: dict, spec: dict) -> tuple[list[str], list[str]]:
