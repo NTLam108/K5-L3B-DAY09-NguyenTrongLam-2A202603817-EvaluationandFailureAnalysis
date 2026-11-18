@@ -8,6 +8,7 @@ Reference values to self-check are in tests/test_lab9_stats.py.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from math import comb
 
 POS = "FAIL"   # the judge's job is to FIND failures, so FAIL is the positive class
 
@@ -88,16 +89,44 @@ def paired_bootstrap(a, b, *, n_resamples=1000, rng=2027, confidence=0.95):
                     rng=np.random.default_rng(rng))
     return diff, float(res.confidence_interval.low), float(res.confidence_interval.high)
 
+
+def _check_nck(n: int, c: int, k: int) -> tuple[int, int, int]:
+    """Validate (n trials, c passing, k drawn): integers with 1 <= k <= n and 0 <= c <= n.
+    bool is rejected on purpose (True is an int in Python but never a valid count)."""
+    vals = (n, c, k)
+    if any(isinstance(v, bool) or not isinstance(v, (int, np_integer())) for v in vals):
+        raise ValueError(f"n, c, k must be integers, got {vals!r}")
+    n, c, k = (int(v) for v in vals)
+    if n < 1:
+        raise ValueError(f"n must be >= 1, got {n}")
+    if not 0 <= c <= n:
+        raise ValueError(f"c must satisfy 0 <= c <= n, got c={c}, n={n}")
+    if not 1 <= k <= n:
+        raise ValueError(f"k must satisfy 1 <= k <= n, got k={k}, n={n}")
+    return n, c, k
+
+
+def np_integer() -> type:
+    """numpy integer type when numpy is importable (counts may come from numpy sums), else int."""
+    try:
+        import numpy as np
+        return np.integer
+    except ImportError:  # pragma: no cover
+        return int
+
+
 def pass_at_k(n: int, c: int, k: int) -> float:
     """Probability that AT LEAST ONE of k trials drawn from n (c of them passing) passes.
     Unbiased estimator (Chen et al. 2021): 1 - C(n-c, k) / C(n, k). Raise ValueError if k > n."""
-    # TODO M6
-    raise NotImplementedError
+    n, c, k = _check_nck(n, c, k)
+    if n - c < k:          # fewer failures than draws: every draw of k contains a pass
+        return 1.0
+    return 1.0 - comb(n - c, k) / comb(n, k)
 
 
 def pass_hat_k(n: int, c: int, k: int) -> float:
     """pass^k (tau-bench, Yao et al. 2024): probability that ALL k trials drawn from n pass.
     Unbiased estimator: C(c, k) / C(n, k). Raise ValueError if k > n.
     pass^k <= pass@1 <= pass@k; a reliable agent keeps pass^k close to pass@1."""
-    # TODO M6
-    raise NotImplementedError
+    n, c, k = _check_nck(n, c, k)
+    return comb(c, k) / comb(n, k)          # comb(c, k) == 0 when c < k

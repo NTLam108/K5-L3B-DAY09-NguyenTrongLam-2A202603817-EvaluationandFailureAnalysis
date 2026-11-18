@@ -63,7 +63,7 @@ Grader được kiểm bằng `python -m lab9.mutation --detect`: **100%** dòng
 | `denial` | 11 | pass_rate | min 0.90 + không giảm có ý nghĩa | 0.945 |
 | `escalation` | 4 | pass_rate | min 0.95 + không giảm có ý nghĩa | 1.0 |
 
-Sàn đặt ≤ giá trị baseline (baseline so với chính nó: exit 0) và trên giá trị của regression công khai. Riêng `adversarial` (0.971) và `denial` (0.945) chỉ cách sàn khoảng 1 trial; sẽ xét lại theo dải nhiễu A/A ở M6.
+Sàn đặt ≤ giá trị baseline (baseline so với chính nó: exit 0) và trên giá trị của regression công khai. Riêng `adversarial` (0.971) và `denial` (0.945) chỉ cách sàn khoảng 1 trial. A/A ở M6 cho Δ = 0 nên giữ được trên MockLLM; với LLM thật phải nới khoảng cách này theo dải nhiễu đo được (xem mục M6).
 
 - **Slice nào bắt lỗi nào** (`python -m lab9.mutation --spec config/metric_spec_v2.yaml --baseline reports/baseline_v2.json` → **mutation score 3/3, false alarms 0**):
 
@@ -73,8 +73,43 @@ Sàn đặt ≤ giá trị baseline (baseline so với chính nó: exit 0) và t
 | `honest_refactor` | merge | merge | — (đổi lời văn + thêm tool call không làm thay đổi metric nào) |
 | `seeded_regression` | block | block | pass_rate (Δ −0.336 CI [−0.500, −0.171]), refund, FM-08, slice money_movement ×3, adversarial, denial |
 | `slice_regression` | block | block | **chỉ slice**: money_movement/pass_rate 0.85 và refund 0.85 (Δ −0.150 CI [−0.300, +0.000]), adversarial/pass_rate 0.914. **`pass_rate` tổng 0.9357 vẫn trên sàn 0.85, CI [−0.121, +0.029] chạm 0, nên gate M4 sẽ cho qua.** |
-| `flaky_regression` | block | block | pass_rate (Δ −0.064 CI [−0.114, −0.014]), slice money_movement, adversarial; `pass_hat_5` sẽ thêm ở M6 |
+| `flaky_regression` | block | block | **pass_hat_5 0.5714** (M6), pass_rate (Δ −0.064 CI [−0.114, −0.014]), slice money_movement, adversarial |
 
 - **Giới hạn v2:** slice `escalation` chỉ có 4 item, nên CI gần như vô nghĩa và slice này chỉ dựa vào sàn. FM-09 mới chỉ có trace "guard chặn đúng", chưa có variant nào làm lộ lỗi. Bug chỉ xuất hiện ở 1/3 seed (`rare`) không phát hiện ổn định được với 5 seed (xem M6).
+
+## v2 (M6): nhiễu, pass@k / pass^k và ngưỡng `pass_hat_5`
+
+- **Định nghĩa:** với n = 5 seed và c lần pass của một item, `pass_at_k` = 1 − C(n−c, k)/C(n, k) (ít nhất 1 trong k lần pass) và `pass_hat_k` = C(c, k)/C(n, k) (cả k lần đều pass), lấy trung bình qua item. Luôn có pass^k ≤ pass@1 ≤ pass@k. Với k = n = 5, `pass_hat_5` của một item là 1 nếu pass cả 5 seed, 0 nếu fail dù chỉ 1 seed. Một seed lỗi làm item mất 0.2 ở `pass_rate` nhưng mất **1.0** ở `pass_hat_5`.
+- **A/A** (`python -m lab9.mutation --spec config/metric_spec_v2.yaml --aa 66,77,88,99,110`; `swarm`, seed 11…55 so với 66…110):
+
+| Metric | seed 11…55 | seed 66…110 | Δ |
+|---|---|---|---|
+| pass_rate | 0.9786 | 0.9786 | +0.0000 |
+| refund_amount_correct | 0.9786 | 0.9786 | +0.0000 |
+| reply_amount_matches_ledger | 1.0 | 1.0 | +0.0000 |
+| pass_at_1 / pass_hat_1 | 0.9786 / 0.9786 | 0.9786 / 0.9786 | +0.0000 |
+| pass_at_3 / pass_hat_3 | 1.0 / 0.9357 | 1.0 / 0.9357 | +0.0000 |
+| pass_at_5 / **pass_hat_5** | 1.0 / **0.8929** | 1.0 / **0.8929** | +0.0000 |
+| cost_per_success | 50.8077 | 50.8077 | +0.0000 |
+
+Δ = 0 ở mọi metric (cả 15 metric trong output). Lý do: MockLLM tất định theo seed, và điểm yếu "tin ticket" của `swarm` bật khi `seed % 5 == 0`; mỗi bộ seed có đúng một seed như vậy (55 và 110), nên cùng 3 claim fail (C-002, C-101, C-102).
+
+- **Vì sao với LLM thật dải nhiễu > 0:** sampling (temperature > 0), provider không tất định ngay cả ở temperature 0 (batching, phần cứng), model đổi phiên bản phía nhà cung cấp, tool timeout/độ trễ. Cùng agent, cùng item sẽ cho kết quả khác nhau giữa các lần chạy. Khi đó phải chạy **nhiều cặp A/A** (nhiều bộ seed / nhiều lần lặp), lấy dải Δ (ví dụ max |Δ| hoặc phân vị 95%), và đặt sàn sao cho **baseline − sàn > dải nhiễu**. Sàn nằm trong dải nhiễu thì gate chặn PR trung thực một cách ngẫu nhiên.
+- **Ngưỡng chọn:** `pass_hat_5` **blocking, min 0.85**, không `no_significant_drop` (report không có cột `pass_hat_5` theo từng dòng nên bootstrap không có gì để resample; sàn là cổng duy nhất).
+  - ≥ 0.80 (yêu cầu rubric).
+  - ≤ baseline 0.8929: baseline so với chính nó vẫn merge (đã kiểm: exit 0). Còn chừa 1 item: 24/28 = 0.857 vẫn qua.
+  - Ngoài dải A/A (Δ = 0 trên MockLLM).
+  - Xa trên `flaky_regression` (0.5714) và `seeded_regression` (0.6429).
+  - Sẽ xét lại khi chuyển sang LLM thật: nếu dải A/A > 0.04 thì 0.85 nằm trong dải nhiễu, phải chọn lại sàn hoặc tăng số seed. Chỉ được làm việc này khi lên eval-set version mới (ratchet).
+- **Kiểm chứng gate:** baseline so với chính nó → merge; `fixed` 1.0, `honest_refactor` 1.0 → merge; `flaky_regression` 0.5714 → **BLOCK `pass_hat_5`** (cùng `pass_rate`, slice money_movement, adversarial); `seeded_regression` 0.6429 → BLOCK. `lab9.mutation` → **3/3, 0 false alarm**. `refund_amount_correct` tổng của flaky không chặn (CI [−0.050, +0.021]), nhưng slice money_movement và `pass_hat_5` chặn. Một variant flaky chạm ít item hơn sẽ làm CI của `pass_rate` chạm 0, khi đó `pass_hat_5` là metric còn lại chặn được.
+- **Vì sao không gate bằng pass@k:** `flaky_regression` có `pass_at_5` = **1.0**, bằng baseline: pass@k che hoàn toàn agent chập chờn. pass@k hợp với tác vụ "thử nhiều lần, lấy bản đúng" (sinh code), không hợp với agent chuyển tiền chỉ được chạy một lần.
+- **Giới hạn cỡ mẫu:** một bug chỉ xuất hiện ở 1/3 số lần chạy **không phát hiện ổn định được với 5 seed**. Nếu xảy ra ngẫu nhiên, xác suất cả 5 seed đều không chạm bug là (2/3)^5 ≈ **13%**. Với seed cố định, phát hiện được hay không phụ thuộc vào bộ seed. Bằng chứng: cùng `flaky_regression` (bug bật khi `seed % 3 == 0`):
+
+| Bộ seed | Seed chạm bug | pass_rate | pass_hat_5 | pass_at_5 |
+|---|---|---|---|---|
+| 11, 22, 33, 44, 55 | chỉ 33 | 0.9143 | 0.5714 | 1.0 |
+| 66, 77, 88, 99, 110 | 66 và 99 | 0.8286 | 0.5714 | 1.0 |
+
+`pass_rate` đổi theo bộ seed (0.91 so với 0.83) dù agent không đổi. `pass_hat_5` ổn định vì chỉ cần 1 seed fail. Không hạ ngưỡng để gate "bắt được" bug hiếm; cách đúng là tăng số seed (ví dụ 10 seed: (2/3)^10 ≈ 1.7%) ở eval-set version sau.
 
 - **Khi nào tăng eval-set version:** khi thêm/bớt item (ví dụ thêm item từ trace case với `provenance.from_trace`, hoặc adversarial pack v2), đổi nhãn (ví dụ sửa nhãn H-081), hoặc đổi `failure_modes`. Mỗi lần tăng version phải chạy lại baseline trên `main`; ngưỡng chỉ được nới khi lên version mới, còn trong cùng version chỉ được siết (ratchet).
